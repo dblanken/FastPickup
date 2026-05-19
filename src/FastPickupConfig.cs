@@ -15,4 +15,7 @@ public class FastPickupConfig
     // How long the range boost around the player stays active after a block break.
     // Clamped to [200, 10000] ms.
     public int RangeBoostDurationMs { get; set; } = 1500;
+
+    // Emit [FastPickup] debug lines to the server log.
+    public bool DebugLogging { get; set; } = false;
 }

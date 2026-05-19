@@ -28,10 +28,11 @@ public class FastPickupModSystem : ModSystem
     private static int _forceAgeMs;
     private static float _scanRadius;
     private static int _pickupDelayMs;
+    private static bool _debug;
 
     private static readonly List<BreakWindow> _windows = new();
 
-    internal static FastPickupConfig Config { get; private set; } = new();
+    internal static FastPickupConfig Config { get; set; } = new();
 
     public override bool ShouldLoad(EnumAppSide side) => side == EnumAppSide.Server;
 
@@ -48,6 +49,15 @@ public class FastPickupModSystem : ModSystem
         _forceAgeMs = 1500;
         _scanRadius = Math.Clamp(Config.FreshDropRadiusBlocks, 0.9f, 40f);
         _pickupDelayMs = Math.Clamp(Config.PickupDelayMs, 0, 4000);
+        _debug = Config.DebugLogging;
+
+        // Confirm that the collection behavior exists on players so we can diagnose
+        // silent failures in TryCollect.
+        sapi.Event.PlayerNowPlaying += sp => {
+            var b = sp.Entity?.GetBehavior<EntityBehaviorCollectEntities>();
+            sapi.Logger.Event("[FastPickup] CollectEntities behavior for {0}: {1}",
+                sp.PlayerName, b != null ? "FOUND" : "NULL – TryCollect will always return false!");
+        };
 
         _harmony = new Harmony(Mod.Info.ModID);
         PatchOnBlockBroken(_harmony, sapi);
@@ -70,24 +80,27 @@ public class FastPickupModSystem : ModSystem
 
     // Postfix on Block.OnBlockBroken and all overrides.
     // Registers a short "break window" so drops from this block are swept up automatically.
-    private static void AfterOnBlockBroken_Postfix(IWorldAccessor world, BlockPos pos, IPlayer player, float dropQuantityMul)
+    private static void AfterOnBlockBroken_Postfix(IWorldAccessor world, BlockPos pos, IPlayer byPlayer, float dropQuantityMultiplier)
     {
-        if (world?.Side != EnumAppSide.Server || player == null || _sapi == null)
+        if (world?.Side != EnumAppSide.Server || byPlayer == null || _sapi == null)
             return;
 
         long now = world.ElapsedMilliseconds;
+        // Items drop during OnBlockBroken (before this Postfix fires), so backdate
+        // the window start slightly to ensure those drops aren't rejected as too old.
+        long freshSince = now - 200;
         Vec3d center = pos.ToVec3d().Add(0.5, 0.5, 0.5);
         int windowMs = Math.Max(_freshDropWindowMs, _pickupDelayMs + 250);
 
         _windows.Add(new BreakWindow
         {
             Center = center,
-            OwnerUid = player.PlayerUID,
-            StartMs = now,
+            OwnerUid = byPlayer.PlayerUID,
+            StartMs = freshSince,
             ExpireMs = now + windowMs
         });
 
-        PickupRangeBoost.Activate(player, _scanRadius, Math.Clamp(Config.RangeBoostDurationMs, 200, 10000), now, now + windowMs);
+        PickupRangeBoost.Activate(byPlayer, _scanRadius, Math.Clamp(Config.RangeBoostDurationMs, 200, 10000), freshSince, now + windowMs);
 
         if (_tickId == 0)
             _tickId = _sapi.World.RegisterGameTickListener(ServerTick, 50);
@@ -127,6 +140,9 @@ public class FastPickupModSystem : ModSystem
 
             if (nearby == null || nearby.Length == 0) continue;
 
+            if (_debug)
+                _sapi.Logger.Event("[FastPickup] MainTick: {0} entities near break center for {1}", nearby.Length, player.PlayerName);
+
             foreach (var entity in nearby)
             {
                 if (entity is not EntityItem item) continue;
@@ -139,14 +155,24 @@ public class FastPickupModSystem : ModSystem
                 double dx = player.Entity.Pos.X - item.Pos.X;
                 double dy = player.Entity.Pos.Y - item.Pos.Y;
                 double dz = player.Entity.Pos.Z - item.Pos.Z;
-                if (dx * dx + dy * dy + dz * dz > _scanRadius * _scanRadius) continue;
+                double distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > _scanRadius * _scanRadius)
+                {
+                    if (_debug)
+                        _sapi.Logger.Event("[FastPickup] MainTick: {0} at dist {1:F1} – fails player-distance check (radius {2})",
+                            item.Itemstack?.GetName() ?? "item", Math.Sqrt(distSq), _scanRadius);
+                    continue;
+                }
 
                 if (PickupTracker.WasJustProcessed(item.EntityId, now)) continue;
 
                 // Force-age the item so the vanilla "too fresh to collect" gate doesn't block us.
                 item.itemSpawnedMilliseconds = now - _forceAgeMs;
 
-                if (PickupHelper.TryCollect(player, item))
+                bool collected = PickupHelper.TryCollect(player, item);
+                if (_debug)
+                    _sapi.Logger.Event("[FastPickup] MainTick: TryCollect({0}) = {1}", item.Itemstack?.GetName() ?? "item", collected);
+                if (collected)
                     PickupTracker.MarkProcessed(item.EntityId, now);
             }
         }

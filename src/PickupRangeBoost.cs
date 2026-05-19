@@ -25,12 +25,14 @@ internal static class PickupRangeBoost
 
     private static ICoreServerAPI? _sapi;
     private static long _tickId;
+    private static bool _debug;
 
     private static readonly Dictionary<string, BoostState> _boosts = new();
 
     public static void Init(ICoreServerAPI sapi, FastPickupConfig config)
     {
         _sapi = sapi;
+        _debug = config.DebugLogging;
     }
 
     // Activate a pickup-radius boost for a player after a block break.
@@ -97,6 +99,9 @@ internal static class PickupRangeBoost
 
             if (nearby == null || nearby.Length == 0) continue;
 
+            if (_debug)
+                _sapi.Logger.Event("[FastPickup] RangeBoost: {0} entities near {1} (radius {2})", nearby.Length, uid, boost.Radius);
+
             int collected = 0;
             for (int i = 0; i < nearby.Length && collected < MaxEntitiesPerTick; i++)
             {
@@ -104,11 +109,20 @@ internal static class PickupRangeBoost
                 if (!item.Alive || item.Itemstack == null || item.Itemstack.StackSize <= 0) continue;
 
                 long spawnedMs = item.itemSpawnedMilliseconds;
-                if (spawnedMs < boost.FreshSinceMs || spawnedMs > boost.FreshUntilMs) continue;
+                if (spawnedMs < boost.FreshSinceMs || spawnedMs > boost.FreshUntilMs)
+                {
+                    if (_debug)
+                        _sapi.Logger.Event("[FastPickup] RangeBoost: {0} rejected – spawnedMs {1} outside [{2}, {3}]",
+                            item.Itemstack?.GetName() ?? "item", spawnedMs, boost.FreshSinceMs, boost.FreshUntilMs);
+                    continue;
+                }
 
                 if (PickupTracker.WasJustProcessed(item.EntityId, now)) continue;
 
-                if (PickupHelper.TryCollect(player, item))
+                bool ok = PickupHelper.TryCollect(player, item);
+                if (_debug)
+                    _sapi.Logger.Event("[FastPickup] RangeBoost: TryCollect({0}) = {1}", item.Itemstack?.GetName() ?? "item", ok);
+                if (ok)
                 {
                     PickupTracker.MarkProcessed(item.EntityId, now);
                     collected++;

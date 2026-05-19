@@ -12,16 +12,28 @@ internal static class PickupHelper
 {
     // Attempt to collect an EntityItem for the given server player by delegating to
     // the player's EntityBehaviorCollectEntities (the same path vanilla uses).
-    // Returns true if the item was collected.
+    // Returns true if the item was fully or partially collected.
+    //
+    // We intentionally ignore OnFoundCollectible's return value and instead check
+    // entity state afterward. In VS 1.22, OnFoundCollectible can return false even
+    // when collection succeeds (e.g., if a subsequent event handler throws), but the
+    // item entity will already be dead or its stack reduced. This matches HandyTweaks'
+    // battle-tested approach.
     public static bool TryCollect(IServerPlayer player, EntityItem item)
     {
         if (player.Entity == null || !item.Alive) return false;
 
+        try { if (!item.CanCollect(player.Entity)) return false; }
+        catch { }
+
         var collector = player.Entity.GetBehavior<EntityBehaviorCollectEntities>();
         if (collector == null) return false;
 
-        try { return collector.OnFoundCollectible(item); }
-        catch { return false; }
+        int stackBefore = item.Itemstack?.StackSize ?? 0;
+        try { collector.OnFoundCollectible(item); } catch { }
+
+        if (!item.Alive) return true;
+        return (item.Itemstack?.StackSize ?? 0) < stackBefore;
     }
 }
 

@@ -29,6 +29,11 @@
       <HintPath>$(VINTAGE_STORY)/Lib/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="configlib">
+      <HintPath>configlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="VSImGui" Version="0.0.6" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

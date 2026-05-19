@@ -2,10 +2,11 @@
   "type": "code",
   "modid": "fastpickup",
   "name": "Fast Pickup",
-  "authors": ["dblanken"],
+  "authors": ["Neimoon"],
   "contributors": ["Interzoner (original HandyTweaks)"],
   "description": "After breaking a block, nearby fresh drops are auto-collected without needing to walk over them. Includes a brief pickup-radius boost. Port of FastPickupPlus + PickupRangeBoost from Interzoner's HandyTweaks.",
   "version": "1.0.0",
-  "side": "Server",
-  "dependencies": { "game": "1.22.0" }
+  "side": "Universal",
+  "dependencies": { "game": "1.22.0" },
+  "optionalDependencies": { "configlib": "*" }
 }
